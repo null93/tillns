@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+##
+# Switch faster between namespaces in helm. Suggested use is to attach the
+# following to your bash_profile:
+#
+# alias helm='tillns --exec'
+#
+# @version 1.0.0
+# @author Rafael Grigorian <me@raffi.io>
+# @license MIT License (See LICENSE.md)
+##
+
+load () {
+	loaded=`cat ~/.tillns 2> /dev/null || echo -n "kube-system"`
+	export TILLER_NAMESPACE="${loaded}"
+	echo -n "$loaded"
+}
+
+save () {
+	echo -n "$1" > ~/.tillns
+}
+
+get_namespaces () {
+	kubectl get ns -o jsonpath="{.items[*].metadata.name}"
+}
+
+usage () {
+	echo "USAGE:"
+	echo "  tillerns                    : list the namespaces in the current context"
+	echo "  tillerns <NAME>             : change the active tiller namespace"
+	echo "  tillerns -e, --exec         : execute helm with current namespace set"
+	echo "  tillerns -c, --current      : show the current tiller namespace"
+	echo "  tillerns -h, --help         : show this message"
+}
+
+list_namespaces () {
+	current=`load`
+	namespaces=`get_namespaces`
+	for namespace in $namespaces; do
+		if [ "$current" == "$namespace" ]; then
+			echo -e "${color}${namespace}${normal}"
+		else
+			echo -e "${namespace}"
+		fi
+	done
+}
+
+set_namespace () {
+	namespaces=`get_namespaces`
+	if [[ " $namespaces " == *" $1 "* ]]; then
+		save "$1"
+		current=`load`
+		echo "Active namespace is \"$current\"."
+	else
+		echo "error: no namespace exists with name \"$1\"."
+		exit 1
+	fi
+}
+
+helm_exec () {
+	load > /dev/null
+	exec helm "$@"
+}
+
+main () {
+	color=`( tput setaf 3 && tput setab 0 ) || true`
+	normal=`tput sgr0 || true`
+	if [[ "$#" -eq 0 ]]; then
+		list_namespaces
+	elif [[ "${1}" == '-e' || "${1}" == '--exec' ]]; then
+		shift
+		helm_exec "$@"
+	elif [[ "$#" -eq 1 ]]; then
+		if [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
+			usage
+		elif [[ "${1}" == '-c' || "${1}" == '--current' ]]; then
+			echo `load`
+		elif [[ "${1}" =~ ^-(.*) ]]; then
+			echo "error: unrecognized flag \"${1}\"" >&2
+			usage
+			exit 1
+		else
+			set_namespace "${1}"
+		fi
+	else
+		echo "error: too many flags" >&2
+		usage
+		exit 1
+	fi
+}
+
+main "$@"
