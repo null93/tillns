@@ -1,93 +1,67 @@
 #!/usr/bin/env bash
 
 ##
+# Installation:
+#
 # Switch faster between namespaces in helm. Suggested use is to attach the
 # following to your bash_profile:
 #
-# alias helm='tillns --exec'
+# alias helm='tillns'
 #
-# @version 1.0.0
+# Usage:
+#
+# To use, simply run helm normally and, i.e.
+# $ helm ls -a
+#
+# If you wish to not interfere with helm, simply pass -- as the first argument
+# $ helm -- ls -a
+#
+# @version 1.1.0
 # @author Rafael Grigorian <me@raffi.io>
 # @license MIT License (See LICENSE.md)
 ##
 
-load () {
-	loaded=`cat ~/.tillns 2> /dev/null || echo -n "kube-system"`
-	export TILLER_NAMESPACE="${loaded}"
-	echo -n "$loaded"
-}
-
-save () {
-	echo -n "$1" > ~/.tillns
-}
-
-get_namespaces () {
-	kubectl get ns -o jsonpath="{.items[*].metadata.name}"
-}
-
-usage () {
-	echo "USAGE:"
-	echo "  tillerns                    : list the namespaces in the current context"
-	echo "  tillerns <NAME>             : change the active tiller namespace"
-	echo "  tillerns -e, --exec         : execute helm with current namespace set"
-	echo "  tillerns -c, --current      : show the current tiller namespace"
-	echo "  tillerns -h, --help         : show this message"
-}
-
-list_namespaces () {
-	current=`load`
-	namespaces=`get_namespaces`
-	for namespace in $namespaces; do
-		if [ "$current" == "$namespace" ]; then
-			echo -e "${color}${namespace}${normal}"
-		else
-			echo -e "${namespace}"
-		fi
-	done
-}
-
-set_namespace () {
-	namespaces=`get_namespaces`
-	if [[ " $namespaces " == *" $1 "* ]]; then
-		save "$1"
-		current=`load`
-		echo "Active namespace is \"$current\"."
+get_kubectl () {
+	if hash kubectl 2>/dev/null; then
+		echo kubectl
 	else
-		echo "error: no namespace exists with name \"$1\"."
+		echo "tillns: kubectl is not installed"
 		exit 1
 	fi
 }
 
-helm_exec () {
-	load > /dev/null
-	exec helm "$@"
+get_context () {
+	kubectl config view -o=jsonpath='{.current-context}'
 }
 
-main () {
-	color=`( tput setaf 3 && tput setab 0 ) || true`
-	normal=`tput sgr0 || true`
-	if [[ "$#" -eq 0 ]]; then
-		list_namespaces
-	elif [[ "${1}" == '-e' || "${1}" == '--exec' ]]; then
-		shift
-		helm_exec "$@"
-	elif [[ "$#" -eq 1 ]]; then
-		if [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
-			usage
-		elif [[ "${1}" == '-c' || "${1}" == '--current' ]]; then
-			echo `load`
-		elif [[ "${1}" =~ ^-(.*) ]]; then
-			echo "error: unrecognized flag \"${1}\"" >&2
-			usage
-			exit 1
-		else
-			set_namespace "${1}"
-		fi
-	else
-		echo "error: too many flags" >&2
-		usage
-		exit 1
-	fi
+get_namespace () {
+	search="{.contexts[?(@.name=='$1')].context.namespace}"
+	response=`kubectl config view -o=jsonpath="$search"`
+	if [[ -n "$response" ]]; then echo "$response"; else echo "kube-system"; fi
 }
 
-main "$@"
+if ! hash kubectl 2>/dev/null; then
+	echo "tillns: kubectl is not installed"
+	exit 1
+fi
+
+if ! hash kubectx 2>/dev/null; then
+	echo "tillns: kubectx is not installed"
+	exit 1
+fi
+
+if ! hash kubens 2>/dev/null; then
+	echo "tillns: kubens is not installed"
+	exit 1
+fi
+
+context=`get_context`
+namespace=`get_namespace $context`
+
+if [[ "$1" == "--" ]]; then
+	shift
+else
+	export TILLER_NAMESPACE="$namespace"
+fi
+
+exec helm "$@"
